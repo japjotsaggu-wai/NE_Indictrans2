@@ -24,11 +24,12 @@ python3 -m pip install --upgrade pip
 
 pip install nltk sacremoses pandas regex mock transformers>=4.33.2 mosestokenizer
 pip install bitsandbytes scipy accelerate datasets
-pip install sentencepiece
+pip install sentencepiece peft
 
 echo "Cloning IndicTransToolkit repository..."
 if [ ! -d "IndicTransToolkit" ]; then
     git clone https://github.com/VarunGumma/IndicTransToolkit.git
+    export PYTHONPATH="$(pwd)/IndicTransToolkit:$PYTHONPATH"
 else
     echo "IndicTransToolkit already cloned."
 fi
@@ -39,3 +40,6 @@ python3 -m pip install --editable ./
 cd ..
 
 echo "IndicTransToolkit setup complete."
+
+source $VENV_DIR/bin/activate
+echo "Virtual environment activated."
