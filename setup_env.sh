@@ -1,11 +1,5 @@
 #!/bin/bash
 
-pip install nltk sacremoses pandas regex mock transformers>=4.33.2 mosestokenizer
-pip install bitsandbytes scipy accelerate datasets
-pip install sentencepiece
-
-
-# Exit the script on errors
 set -e
 
 VENV_DIR="it2_idsp"
@@ -26,6 +20,11 @@ echo "Virtual environment activated."
 # Upgrade pip
 echo "Upgrading pip..."
 python3 -m pip install --upgrade pip
+
+
+pip install nltk sacremoses pandas regex mock transformers>=4.33.2 mosestokenizer
+pip install bitsandbytes scipy accelerate datasets
+pip install sentencepiece
 
 echo "Cloning IndicTransToolkit repository..."
 if [ ! -d "IndicTransToolkit" ]; then
