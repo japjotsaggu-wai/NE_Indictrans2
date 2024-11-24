@@ -7,11 +7,13 @@ from IndicTransToolkit import IndicProcessor
 from nltk import sent_tokenize
 from indicnlp.tokenize.sentence_tokenize import sentence_split, DELIM_PAT_NO_DANDA
 from peft import PeftModel
+from mosestokenizer import MosesSentenceSplitter
+
 
 #Constants
 BATCH_SIZE = 4
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-FLORES_CODES = {
+flores_codes = {
     "asm_Beng": "as",
     "awa_Deva": "hi",
     "ben_Beng": "bn",
@@ -46,16 +48,25 @@ FLORES_CODES = {
     "urd_Arab": "ur",
 }
 base_ckpt_dir = "ai4bharat/indictrans2-indic-en-dist-200M"
-lora_ckpt_dir = "https://github.com/japjotsaggu-wai/NE_Indictrans2.git"
+lora_ckpt_dir = "japjotsaggu/indictrans2-final"
+
 
 def split_sentences(input_text, lang):
     if lang == "eng_Latn":
         input_sentences = sent_tokenize(input_text)
+        with MosesSentenceSplitter(flores_codes[lang]) as splitter:
+            sents_moses = splitter([input_text])
+        sents_nltk = sent_tokenize(input_text)
+        if len(sents_nltk) < len(sents_moses):
+            input_sentences = sents_nltk
+        else:
+            input_sentences = sents_moses
+        input_sentences = [sent.replace("\xad", "") for sent in input_sentences]
     else:
         input_sentences = sentence_split(
-            input_text, lang=FLORES_CODES[lang], delim_pat=DELIM_PAT_NO_DANDA
+            input_text, lang=flores_codes[lang], delim_pat=DELIM_PAT_NO_DANDA
         )
-    return [sent.replace("\xad", "") for sent in input_sentences]
+    return input_sentences
 
 def initialize_model_and_tokenizer(base_ckpt_dir, lora_ckpt_dir, quantization, attn_implementation):
     # Configure quantization
@@ -89,16 +100,25 @@ def initialize_model_and_tokenizer(base_ckpt_dir, lora_ckpt_dir, quantization, a
     lora_model = PeftModel.from_pretrained(base_model, lora_ckpt_dir)
     return tokenizer, lora_model
 
+
 def batch_translate(input_sentences, src_lang, tgt_lang, model, tokenizer, ip):
     translations = []
     for i in range(0, len(input_sentences), BATCH_SIZE):
         batch = input_sentences[i : i + BATCH_SIZE]
+
+        # Preprocess the batch and extract entity mappings
         batch = ip.preprocess_batch(batch, src_lang=src_lang, tgt_lang=tgt_lang)
 
+        # Tokenize the batch and generate input encodings
         inputs = tokenizer(
-            batch, truncation=True, padding="longest", return_tensors="pt"
+            batch,
+            truncation=True,
+            padding="longest",
+            return_tensors="pt",
+            return_attention_mask=True,
         ).to(DEVICE)
 
+        # Generate translations using the model
         with torch.no_grad():
             generated_tokens = model.generate(
                 **inputs,
@@ -109,20 +129,30 @@ def batch_translate(input_sentences, src_lang, tgt_lang, model, tokenizer, ip):
                 num_return_sequences=1,
             )
 
-        translations += tokenizer.batch_decode(
-            generated_tokens.cpu().tolist(), skip_special_tokens=True
-        )
+        # Decode the generated tokens into text
+        with tokenizer.as_target_tokenizer():
+            generated_tokens = tokenizer.batch_decode(
+                generated_tokens.detach().cpu().tolist(),
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=True,
+            )
 
+        # Postprocess the translations, including entity replacement
+        translations += ip.postprocess_batch(generated_tokens, lang=tgt_lang)
+
+        del inputs
         torch.cuda.empty_cache()
 
     return translations
 
+
 def main():
-    quantization = sys.argv[1] if len(sys.argv) > 3 else ""
-    attn_implementation = sys.argv[2] if len(sys.argv) > 4 else "eager"
+    
+    quantization = sys.argv[2] if len(sys.argv) > 2 else ""
+    attn_implementation = sys.argv[3] if len(sys.argv) > 3 else "eager"
 
     ip = IndicProcessor(inference=True)
-
+    
     tokenizer, lora_model = initialize_model_and_tokenizer(
         base_ckpt_dir, lora_ckpt_dir, quantization, attn_implementation
     )
@@ -130,10 +160,14 @@ def main():
     src_lang = "hin_Deva"  # Example source language
     tgt_lang = "eng_Latn"  # Target language
 
-    input_text = "आपका स्वागत है।"
-    input_sentences = split_sentences(input_text, src_lang)
+    hi_sents = [
+    "जब मैं छोटा था, मैं हर रोज़ पार्क जाता था।",
+    "उसके पास बहुत सारी पुरानी किताबें हैं, जिन्हें उसने अपने दादा-परदादा से विरासत में पाया।",
+    "मुझे समझ में नहीं आ रहा कि मैं अपनी समस्या का समाधान कैसे ढूंढूं।",
+    "वह बहुत मेहनती और समझदार है, इसलिए उसे सभी अच्छे मार्क्स मिले।",
+    "हमने पिछले सप्ताह एक नई फिल्म देखी जो कि बहुत प्रेरणादायक थी।",]
 
-    translations = batch_translate(input_sentences, src_lang, tgt_lang, lora_model, tokenizer, ip)
+    translations = batch_translate(hi_sents, src_lang, tgt_lang, lora_model, tokenizer, ip)
     print("Translations:", translations)
 
 if __name__ == "__main__":
