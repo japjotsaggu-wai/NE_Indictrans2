@@ -1,6 +1,7 @@
 import os
 import sys
 import torch
+import pandas as pd
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, BitsAndBytesConfig
 from transformers.utils import is_flash_attn_2_available, is_flash_attn_greater_or_equal_2_10
 from IndicTransToolkit import IndicProcessor
@@ -8,47 +9,15 @@ from nltk import sent_tokenize
 from indicnlp.tokenize.sentence_tokenize import sentence_split, DELIM_PAT_NO_DANDA
 from peft import PeftModel
 from mosestokenizer import MosesSentenceSplitter
+from config import (
+    base_ckpt_dir,
+    lora_ckpt_dir,
+    BATCH_SIZE,
+    flores_codes,
+)
 
 
-#Constants
-BATCH_SIZE = 4
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-flores_codes = {
-    "asm_Beng": "as",
-    "awa_Deva": "hi",
-    "ben_Beng": "bn",
-    "bho_Deva": "hi",
-    "brx_Deva": "hi",
-    "doi_Deva": "hi",
-    "eng_Latn": "en",
-    "gom_Deva": "kK",
-    "guj_Gujr": "gu",
-    "hin_Deva": "hi",
-    "hne_Deva": "hi",
-    "kan_Knda": "kn",
-    "kas_Arab": "ur",
-    "kas_Deva": "hi",
-    "kha_Latn": "en",
-    "lus_Latn": "en",
-    "mag_Deva": "hi",
-    "mai_Deva": "hi",
-    "mal_Mlym": "ml",
-    "mar_Deva": "mr",
-    "mni_Beng": "bn",
-    "mni_Mtei": "hi",
-    "npi_Deva": "ne",
-    "ory_Orya": "or",
-    "pan_Guru": "pa",
-    "san_Deva": "hi",
-    "sat_Olck": "or",
-    "snd_Arab": "ur",
-    "snd_Deva": "hi",
-    "tam_Taml": "ta",
-    "tel_Telu": "te",
-    "urd_Arab": "ur",
-}
-base_ckpt_dir = "ai4bharat/indictrans2-indic-en-dist-200M"
-lora_ckpt_dir = "japjotsaggu/indictrans2-final"
 
 
 def split_sentences(input_text, lang):
@@ -147,28 +116,38 @@ def batch_translate(input_sentences, src_lang, tgt_lang, model, tokenizer, ip):
 
 
 def main():
-    
+    path_to_csv = sys.argv[1] if len(sys.argv) > 1 
     quantization = sys.argv[2] if len(sys.argv) > 2 else ""
     attn_implementation = sys.argv[3] if len(sys.argv) > 3 else "eager"
-
-    ip = IndicProcessor(inference=True)
     
-    tokenizer, lora_model = initialize_model_and_tokenizer(
-        base_ckpt_dir, lora_ckpt_dir, quantization, attn_implementation
-    )
+    if not path_to_csv:
+        print("Usage: python script.py <path_to_csv> [quantization] [attn_implementation]")
+        sys.exit(1)
 
-    src_lang = "hin_Deva"  # Example source language
-    tgt_lang = "eng_Latn"  # Target language
+    input_csv = pd.read_csv(path_to_csv)
+    #new column
+    input_csv["translation"] = None 
+    
+    ip = IndicProcessor(inference=True)
 
-    hi_sents = [
-    "जब मैं छोटा था, मैं हर रोज़ पार्क जाता था।",
-    "उसके पास बहुत सारी पुरानी किताबें हैं, जिन्हें उसने अपने दादा-परदादा से विरासत में पाया।",
-    "मुझे समझ में नहीं आ रहा कि मैं अपनी समस्या का समाधान कैसे ढूंढूं।",
-    "वह बहुत मेहनती और समझदार है, इसलिए उसे सभी अच्छे मार्क्स मिले।",
-    "हमने पिछले सप्ताह एक नई फिल्म देखी जो कि बहुत प्रेरणादायक थी।",]
-
-    translations = batch_translate(hi_sents, src_lang, tgt_lang, lora_model, tokenizer, ip)
-    print("Translations:", translations)
+    for src_lang in input_csv['lang'].unique():
+        tokenizer, lora_model = initialize_model_and_tokenizer(
+            base_ckpt_dir, lora_ckpt_dir, quantization, attn_implementation
+        )
+    
+        tgt_lang = "eng_Latn"  
+        
+        #group by language first
+        lang_group = input_csv[input_csv["lang"] == src_lang] 
+        sentences = lang_group["source"].tolist() 
+    
+        translations = batch_translate(sents, src_lang, tgt_lang, lora_model, tokenizer, ip)
+        input_csv.loc[lang_group.index, "translation"] = translations
+        
+        del tokenizer, lora_model
+    
+    #saved to the same path
+    input_csv.to_csv(path_to_csv) 
 
 if __name__ == "__main__":
     main()
