@@ -45,7 +45,7 @@ FLORES_CODES = {
     "tel_Telu": "te",
     "urd_Arab": "ur",
 }
-base_ckpt_dir = "https://huggingface.co/ai4bharat/indictrans2-indic-en-dist-200M"
+base_ckpt_dir = "ai4bharat/indictrans2-indic-en-dist-200M"
 lora_ckpt_dir = "https://github.com/japjotsaggu-wai/NE_Indictrans2.git"
 
 def split_sentences(input_text, lang):
